@@ -202,7 +202,6 @@ func TestServer_ConstructedConfig(t *testing.T) {
 		WithFaultCb("./.daos/fd_callback").
 		WithFaultPath("/vcdu0/rack1/hostname").
 		WithHyperthreads(true).
-		WithShutdownTimeout("5s").
 		WithProviderValidator(netdetect.ValidateProviderStub).
 		WithNUMAValidator(netdetect.ValidateNUMAStub).
 		WithServers(
@@ -308,12 +307,6 @@ func TestServer_ConfigValidation(t *testing.T) {
 				return c.WithAccessPoints("1.2.3.4:0")
 			},
 			FaultConfigBadControlPort,
-		},
-		"bad shutdown timeout value": {
-			func(c *Configuration) *Configuration {
-				return c.WithShutdownTimeout("123abc")
-			},
-			FaultConfigBadShutdownTimeout,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

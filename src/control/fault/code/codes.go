@@ -79,7 +79,6 @@ const (
 	ServerConfigBadAccessPoints
 	ServerConfigBadProvider
 	ServerConfigNoServers
-	ServerConfigBadShutdownTimeout
 	ServerScmUnmanaged
 	ServerBdevNotFound
 	ServerBdevFormatSkipped

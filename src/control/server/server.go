@@ -50,8 +50,9 @@ import (
 )
 
 const (
-	ControlPlaneName = "DAOS Control Server"
-	DataPlaneName    = "DAOS I/O Server"
+	ControlPlaneName        = "DAOS Control Server"
+	DataPlaneName           = "DAOS I/O Server"
+	ioserverShutdownTimeout = "10s"
 )
 
 func cfgHasBdev(cfg *Configuration) bool {
@@ -251,20 +252,21 @@ func Start(log *logging.LeveledLogger, cfg *Configuration) error {
 		sig := <-sigChan
 		log.Debugf("Caught signal: %s", sig)
 
-		// Attampt graceful shutdown of I/O servers.
-		timeout, err := time.ParseDuration(cfg.ShutdownTimeout)
+		// SIGKILL I/O servers if still running on return.
+		defer shutdown()
+
+		timeout, err := time.ParseDuration(ioserverShutdownTimeout)
 		if err != nil {
-			log.Errorf("parsing shutdown timeout from config: %s", err)
-		} else {
-			stopCtx, cancel := context.WithTimeout(ctx, timeout)
-			if err := harness.StopInstances(log, stopCtx, sig); err != nil {
-				log.Errorf("stopping instances: %s", err)
-			}
-			cancel()
+			log.Error(errors.Wrap(err, "parsing shutdown timeout").Error())
 		}
 
-		// Will SIGKILL I/O servers if still running.
-		shutdown()
+		stopCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		// Attampt graceful shutdown of I/O servers.
+		if err := harness.StopInstances(log, stopCtx, sig); err != nil {
+			log.Error(errors.Wrap(err, "stopping instances").Error())
+		}
 	}()
 
 	if err := harness.AwaitStorageReady(ctx, cfg.RecreateSuperblocks); err != nil {

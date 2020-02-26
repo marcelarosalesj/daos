@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	yaml "gopkg.in/yaml.v2"
@@ -70,7 +69,6 @@ type Configuration struct {
 	ControlLogJSON      bool                      `yaml:"control_log_json,omitempty"`
 	HelperLogFile       string                    `yaml:"helper_log_file"`
 	RecreateSuperblocks bool                      `yaml:"recreate_superblocks"`
-	ShutdownTimeout     string                    `yaml:"shutdown_timeout"`
 
 	// duplicated in ioserver.Config
 	SystemName string                `yaml:"name"`
@@ -276,13 +274,6 @@ func (c *Configuration) WithHelperLogFile(filePath string) *Configuration {
 	return c
 }
 
-// WithShutdownTimeout sets the graceful shutdown timeout after which SIGKILL
-// sent to I/O server processes when control server is shutting down.
-func (c *Configuration) WithShutdownTimeout(duration string) *Configuration {
-	c.ShutdownTimeout = duration
-	return c
-}
-
 // parse decodes YAML representation of configuration
 func (c *Configuration) parse(data []byte) error {
 	return yaml.Unmarshal(data, c)
@@ -300,7 +291,6 @@ func newDefaultConfiguration(ext External) *Configuration {
 		Hyperthreads:       false,
 		Path:               defaultConfigPath,
 		ControlLogMask:     ControlLogLevel(logging.LogLevelInfo),
-		ShutdownTimeout:    "10s",
 		ext:                ext,
 		validateProviderFn: netdetect.ValidateProviderStub,
 		validateNUMAFn:     netdetect.ValidateNUMAStub,
@@ -456,11 +446,6 @@ func (c *Configuration) Validate(log logging.Logger) (err error) {
 		if err := validateMultiServerConfig(log, c); err != nil {
 			return err
 		}
-	}
-
-	if _, err := time.ParseDuration(c.ShutdownTimeout); err != nil {
-		return errors.Wrap(FaultConfigBadShutdownTimeout,
-			err.Error())
 	}
 
 	return nil

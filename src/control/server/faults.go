@@ -64,11 +64,6 @@ var (
 		"no DAOS IO Servers specified in configuration",
 		"specify at least one IO Server configuration ('servers' list parameter) and restart the control server",
 	)
-	FaultConfigBadShutdownTimeout = serverFault(
-		code.ServerConfigBadShutdownTimeout,
-		"shutdown value could not be parsed",
-		"specify a valid timeout e.g. 3s in configuration and restart the control server",
-	)
 	FaultHarnessNotStarted = serverFault(
 		code.ServerHarnessNotStarted,
 		"harness for DAOS IO Server instances is not started",
