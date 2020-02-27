@@ -985,8 +985,6 @@ rebuild_leader_start(struct ds_pool *pool, uint32_t rebuild_ver,
 		     struct pool_target_id_list *tgts_failed,
 		     struct rebuild_global_pool_tracker **p_rgt)
 {
-	uint32_t	map_ver;
-	d_iov_t	map_buf_iov = {0};
 	daos_prop_t	*prop = NULL;
 	uint64_t	leader_term;
 	int		rc;
@@ -1008,19 +1006,11 @@ rebuild_leader_start(struct ds_pool *pool, uint32_t rebuild_ver,
 		D_GOTO(out, rc);
 	}
 
-	rc = ds_pool_map_buf_get(pool->sp_uuid, &map_buf_iov, &map_ver);
+	rc = ds_pool_map_dist(pool->sp_uuid);
 	if (rc) {
 		D_ERROR("pool map broadcast failed: rc "DF_RC"\n", DP_RC(rc));
 		D_GOTO(out, rc);
 	}
-
-	/* IV bcast the pool map in case for offline rebuild */
-	rc = ds_pool_iv_map_update(pool, map_buf_iov.iov_buf, map_ver);
-	if (rc) {
-		D_ERROR("ds_pool_iv_map_update failed %d.\n", rc);
-		D_GOTO(out, rc);
-	}
-	D_FREE(map_buf_iov.iov_buf);
 
 	rc = ds_pool_prop_fetch(pool, DAOS_PO_QUERY_PROP_ALL, &prop);
 	if (rc) {

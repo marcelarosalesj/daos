@@ -116,8 +116,6 @@ int ds_pool_bcast_create(crt_context_t ctx, struct ds_pool *pool,
 			 crt_rpc_t **rpc, crt_bulk_t bulk_hdl,
 			 d_rank_list_t *excluded_list);
 
-int ds_pool_map_buf_get(uuid_t uuid, d_iov_t *iov, uint32_t *map_ver);
-
 int ds_pool_tgt_exclude_out(uuid_t pool_uuid, struct pool_target_id_list *list);
 int ds_pool_tgt_exclude(uuid_t pool_uuid, struct pool_target_id_list *list);
 
@@ -220,5 +218,6 @@ ds_pool_enable_evict(void);
 
 int ds_pool_svc_check_evict(uuid_t pool_uuid, d_rank_list_t *ranks,
 			    uint32_t force);
-
+int
+ds_pool_map_dist(uuid_t pool_uuid);
 #endif /* __DAOS_SRV_POOL_H__ */

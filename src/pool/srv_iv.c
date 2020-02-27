@@ -549,7 +549,7 @@ pool_iv_update(void *ns, int class_id, struct pool_iv_entry *pool_iv,
 	pool_key = (struct pool_iv_key *)key.key_buf;
 	pool_key->pik_entry_size = pool_iv_len;
 	rc = ds_iv_update(ns, &key, &sgl, shortcut, sync_mode, 0,
-			  true /* retry */);
+			  false /* retry */);
 	if (rc)
 		D_ERROR("iv update failed "DF_RC"\n", DP_RC(rc));
 

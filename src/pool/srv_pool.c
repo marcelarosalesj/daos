@@ -1147,6 +1147,28 @@ pool_svc_step_down_cb(struct ds_rsvc *rsvc)
 		DP_UUID(svc->ps_uuid), rank, svc->ps_rsvc.s_term);
 }
 
+static int
+pool_svc_lookup_leader(uuid_t uuid, struct pool_svc **svcp,
+		       struct rsvc_hint *hint)
+{
+	struct ds_rsvc *rsvc;
+	d_iov_t	id;
+	int		rc;
+
+	d_iov_set(&id, uuid, sizeof(uuid_t));
+	rc = ds_rsvc_lookup_leader(DS_RSVC_CLASS_POOL, &id, &rsvc, hint);
+	if (rc != 0)
+		return rc;
+	*svcp = pool_svc_obj(rsvc);
+	return 0;
+}
+
+static void
+pool_svc_put_leader(struct pool_svc *svc)
+{
+	ds_rsvc_put_leader(&svc->ps_rsvc);
+}
+
 static void
 pool_svc_drain_cb(struct ds_rsvc *rsvc)
 {
@@ -1155,38 +1177,59 @@ pool_svc_drain_cb(struct ds_rsvc *rsvc)
 	ds_rebuild_leader_stop(svc->ps_uuid, -1);
 }
 
-static int
-pool_svc_map_dist_cb(struct ds_rsvc *rsvc)
+int
+ds_pool_map_dist(uuid_t pool_uuid)
 {
-	struct pool_svc	       *svc = pool_svc_obj(rsvc);
-	struct rdb_tx		tx;
-	struct pool_buf	       *map_buf = NULL;
-	uint32_t		map_version;
-	int			rc;
+	struct rdb_tx	tx;
+	struct pool_svc	*svc;
+	struct pool_buf	*map_buf = NULL;
+	uint32_t	map_version;
+	int		rc;
 
-	/* Read the pool map into map_buf and map_version. */
-	rc = rdb_tx_begin(rsvc->s_db, rsvc->s_term, &tx);
+	rc = pool_svc_lookup_leader(pool_uuid, &svc, NULL);
 	if (rc != 0)
-		goto out;
+		return rc;
+again:
+	rc = rdb_tx_begin(svc->ps_rsvc.s_db, svc->ps_rsvc.s_term, &tx);
+	if (rc != 0)
+		D_GOTO(out_svc, rc);
+
 	ABT_rwlock_rdlock(svc->ps_lock);
 	rc = read_map_buf(&tx, &svc->ps_root, &map_buf, &map_version);
 	ABT_rwlock_unlock(svc->ps_lock);
 	rdb_tx_end(&tx);
 	if (rc != 0) {
-		D_ERROR(DF_UUID": failed to read pool map buffer: %d\n",
-			DP_UUID(svc->ps_uuid), rc);
-		goto out;
+		D_ERROR(DF_UUID": failed to read pool map buffer: "DF_RC"\n",
+			DP_UUID(svc->ps_uuid), DP_RC(rc));
+		D_GOTO(out_svc, rc);
 	}
 
 	rc = ds_pool_iv_map_update(svc->ps_pool, map_buf, map_version);
-	if (rc != 0)
-		D_ERROR(DF_UUID": failed to distribute pool map %u: %d\n",
-			DP_UUID(svc->ps_uuid), map_version, rc);
-
-out:
+	if (rc != 0) {
+		if (rc == -DER_GRPVER) {
+			/* Some one might update group version, let's retry. */
+			D_DEBUG(DB_MD, DF_UUID" retry map distribute.\n",
+				DP_UUID(svc->ps_uuid));
+			D_FREE(map_buf);
+			map_buf = NULL;
+			goto again;
+		} else {
+			D_ERROR(DF_UUID": failed to distribute pool map"
+				" %u: %d\n", DP_UUID(svc->ps_uuid),
+				map_version, rc);
+		}
+	}
+out_svc:
+	pool_svc_put_leader(svc);
 	if (map_buf != NULL)
 		D_FREE(map_buf);
 	return rc;
+}
+
+static int
+pool_svc_map_dist_cb(struct ds_rsvc *rsvc)
+{
+	return ds_pool_map_dist(pool_svc_obj(rsvc)->ps_uuid);
 }
 
 static struct ds_rsvc_class pool_svc_rsvc_class = {
@@ -1228,28 +1271,6 @@ pool_svc_lookup(uuid_t uuid, struct pool_svc **svcp)
 		return rc;
 	*svcp = pool_svc_obj(rsvc);
 	return 0;
-}
-
-static int
-pool_svc_lookup_leader(uuid_t uuid, struct pool_svc **svcp,
-		       struct rsvc_hint *hint)
-{
-	struct ds_rsvc *rsvc;
-	d_iov_t	id;
-	int		rc;
-
-	d_iov_set(&id, uuid, sizeof(uuid_t));
-	rc = ds_rsvc_lookup_leader(DS_RSVC_CLASS_POOL, &id, &rsvc, hint);
-	if (rc != 0)
-		return rc;
-	*svcp = pool_svc_obj(rsvc);
-	return 0;
-}
-
-static void
-pool_svc_put_leader(struct pool_svc *svc)
-{
-	ds_rsvc_put_leader(&svc->ps_rsvc);
 }
 
 /** Look up container service \a pool_uuid. */
@@ -4055,46 +4076,6 @@ ds_pool_svc_stop_handler(crt_rpc_t *rpc)
 	D_DEBUG(DF_DSMS, DF_UUID": replying rpc %p: "DF_RC"\n",
 		DP_UUID(in->psi_op.pi_uuid), rpc, DP_RC(rc));
 	crt_reply_send(rpc);
-}
-
-/**
- * Get a copy of the latest pool map buffer. Callers are responsible for
- * freeing iov->iov_buf with D_FREE.
- */
-int
-ds_pool_map_buf_get(uuid_t uuid, d_iov_t *iov, uint32_t *map_version)
-{
-	struct pool_svc	*svc;
-	struct rdb_tx	tx;
-	struct pool_buf	*map_buf;
-	int		rc;
-
-	rc = pool_svc_lookup_leader(uuid, &svc, NULL /* hint */);
-	if (rc != 0)
-		D_GOTO(out, rc);
-
-	rc = rdb_tx_begin(svc->ps_rsvc.s_db, svc->ps_rsvc.s_term, &tx);
-	if (rc != 0)
-		D_GOTO(out_svc, rc);
-
-	ABT_rwlock_rdlock(svc->ps_lock);
-	rc = read_map_buf(&tx, &svc->ps_root, &map_buf, map_version);
-	if (rc != 0) {
-		D_ERROR(DF_UUID": failed to read pool map: "DF_RC"\n",
-			DP_UUID(svc->ps_uuid), DP_RC(rc));
-		D_GOTO(out_lock, rc);
-	}
-	D_ASSERT(map_buf != NULL);
-	iov->iov_buf = map_buf;
-	iov->iov_len = pool_buf_size(map_buf->pb_nr);
-	iov->iov_buf_len = pool_buf_size(map_buf->pb_nr);
-out_lock:
-	ABT_rwlock_unlock(svc->ps_lock);
-	rdb_tx_end(&tx);
-out_svc:
-	pool_svc_put_leader(svc);
-out:
-	return rc;
 }
 
 void
