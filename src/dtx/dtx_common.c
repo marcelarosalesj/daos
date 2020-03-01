@@ -236,6 +236,8 @@ dtx_handle_init(struct dtx_id *dti, daos_unit_oid_t *oid, daos_handle_t coh,
 	dth->dth_has_ilog = 0;
 	dth->dth_renew = 0;
 	dth->dth_actived = 0;
+	dth->dth_local_tx_started = 0;
+	dth->dth_last_modification = 0;
 }
 
 /**

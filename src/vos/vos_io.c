@@ -1368,9 +1368,14 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 
 	umem = vos_ioc2umm(ioc);
 
-	err = umem_tx_begin(umem, vos_txd_get());
-	if (err)
-		goto out;
+	if (dth == NULL || !dth->dth_local_tx_started) {
+		err = umem_tx_begin(umem, vos_txd_get());
+		if (err != 0)
+			goto out;
+
+		if (dth != NULL)
+			dth->dth_local_tx_started = 1;
+	}
 
 	vos_dth_set(dth);
 
@@ -1413,7 +1418,11 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 		err = vos_dtx_prepared(dth);
 
 abort:
-	err = err ? umem_tx_abort(umem, err) : umem_tx_commit(umem);
+	if (dth == NULL || dth->dth_last_modification || err != 0) {
+		err = err ? umem_tx_abort(umem, err) : umem_tx_commit(umem);
+		if (dth != NULL)
+			dth->dth_local_tx_started = 0;
+	}
 out:
 	if (err != 0) {
 		vos_dtx_cleanup_dth(dth);

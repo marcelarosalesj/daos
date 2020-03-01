@@ -149,9 +149,14 @@ vos_obj_punch(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	vos_dth_set(dth);
 	cont = vos_hdl2cont(coh);
 
-	rc = umem_tx_begin(vos_cont2umm(cont), NULL);
-	if (rc != 0)
-		goto reset;
+	if (dth == NULL || !dth->dth_local_tx_started) {
+		rc = umem_tx_begin(vos_cont2umm(cont), NULL);
+		if (rc != 0)
+			goto reset;
+
+		if (dth != NULL)
+			dth->dth_local_tx_started = 1;
+	}
 
 	/* Commit the CoS DTXs via the PUNCH PMDK transaction. */
 	if (dth != NULL && dth->dth_dti_cos_count > 0 &&
@@ -172,10 +177,15 @@ vos_obj_punch(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 			rc = obj_punch(coh, obj, epoch, flags);
 	}
 
-	if (dth != NULL && rc == 0)
+	if (dth != NULL && dth->dth_last_modification && rc == 0)
 		rc = vos_dtx_prepared(dth);
 
-	rc = umem_tx_end(vos_cont2umm(cont), rc);
+	if (dth == NULL || dth->dth_last_modification || rc != 0) {
+		rc = umem_tx_end(vos_cont2umm(cont), rc);
+		if (dth != NULL)
+			dth->dth_local_tx_started = 0;
+	}
+
 	if (obj != NULL)
 		vos_obj_release(vos_obj_cache_current(), obj, rc != 0);
 
