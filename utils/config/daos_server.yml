@@ -145,15 +145,6 @@
 #helper_log_file: /tmp/daos_admin.log
 #
 #
-## Set the graceful shutdown timeout for DAOS I/O server termination.
-## After politely asking I/O server processes to exit when DAOS control
-## server is shutting down, when the timeout expires, the I/O server
-## processes are forcefully terminated.
-#
-## default: 10s
-#shutdown_timeout: 5s
-#
-#
 ## When per-server definitions exist, auto-allocation of resources is not
 ## performed. Without per-server definitions, node resources will
 ## automatically be assigned to servers based on NUMA ratings, there will
