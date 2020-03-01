@@ -45,8 +45,8 @@ import (
 
 const (
 	instanceUpdateDelay = 500 * time.Millisecond
-	minScmSize          = "16MiB" // per VOS target
-	minNvmeSize         = "1GB"   // per VOS target
+	minScmBytes         = 16 * humanize.MiByte // per VOS target
+	minNvmeBytes        = 1 * humanize.GByte   // per VOS target
 )
 
 // NewRankResult returns a reference to a new member result struct.
@@ -317,36 +317,16 @@ func checkIsMSReplica(mi *IOServerInstance) error {
 	return nil
 }
 
-// validatePool ensures minimum SCM/NVMe pool size per VOS target.
-//
-// Pool size request params are per-ioserver so need to be larger than minimum
-// allocation for each target.
-func (svc *mgmtSvc) validatePool(targetCount uint64, req *mgmtpb.PoolCreateReq) error {
-	minScmBytes, err := humanize.ParseBytes(minScmSize)
-	if err != nil {
-		return err
-	}
-	if req.Scmbytes < minScmBytes*targetCount {
-		return FaultPoolScmTooSmall(req.Scmbytes)
-	}
-
-	if req.Nvmebytes == 0 {
-		return nil // SCM only pool is valid
-	}
-
-	minNvmeBytes, err := humanize.ParseBytes(minNvmeSize)
-	if err != nil {
-		return err
-	}
-	if req.Nvmebytes < minNvmeBytes*targetCount {
-		return FaultPoolNvmeTooSmall(req.Nvmebytes)
-	}
-
-	return nil
-}
-
 // PoolCreate implements the method defined for the Management Service.
+//
+// Validate minimum SCM/NVMe pool size per VOS target, pool size request params
+// are per-ioserver so need to be larger than (minimum_target_allocation *
+// target_count).
 func (svc *mgmtSvc) PoolCreate(ctx context.Context, req *mgmtpb.PoolCreateReq) (*mgmtpb.PoolCreateResp, error) {
+	if req == nil {
+		return nil, errors.New("nil request")
+	}
+
 	svc.log.Debugf("MgmtSvc.PoolCreate dispatch, req:%+v\n", *req)
 
 	mi, err := svc.harness.GetMSLeaderInstance()
@@ -354,9 +334,15 @@ func (svc *mgmtSvc) PoolCreate(ctx context.Context, req *mgmtpb.PoolCreateReq) (
 		return nil, err
 	}
 
-	targetCount := uint64(mi.runner.GetConfig().TargetCount)
-	if err := svc.validatePool(targetCount, req); err != nil {
-		return nil, errors.Wrap(err, "validate pool create parameters")
+	targetCount := mi.runner.GetConfig().TargetCount
+	if targetCount == 0 {
+		return nil, errors.New("zero target count")
+	}
+	if req.Scmbytes < minScmBytes*uint64(targetCount) {
+		return nil, FaultPoolScmTooSmall(req.Scmbytes, targetCount)
+	}
+	if req.Nvmebytes != 0 && req.Nvmebytes < minNvmeBytes*uint64(targetCount) {
+		return nil, FaultPoolNvmeTooSmall(req.Nvmebytes, targetCount)
 	}
 
 	dresp, err := mi.CallDrpc(drpc.ModuleMgmt, drpc.MethodPoolCreate, req)
@@ -376,6 +362,14 @@ func (svc *mgmtSvc) PoolCreate(ctx context.Context, req *mgmtpb.PoolCreateReq) (
 
 // PoolDestroy implements the method defined for the Management Service.
 func (svc *mgmtSvc) PoolDestroy(ctx context.Context, req *mgmtpb.PoolDestroyReq) (*mgmtpb.PoolDestroyResp, error) {
+	if req == nil {
+		return nil, errors.New("nil request")
+	}
+	if req.GetUuid() == "" {
+		// TODO: do we want to validate pool exists via ListPools?
+		return nil, errors.New("nil UUID")
+	}
+
 	svc.log.Debugf("MgmtSvc.PoolDestroy dispatch, req:%+v\n", *req)
 
 	mi, err := svc.harness.GetMSLeaderInstance()

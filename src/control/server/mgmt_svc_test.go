@@ -140,6 +140,233 @@ func TestCheckMgmtSvcReplica(t *testing.T) {
 	}
 }
 
+func TestMgmtSvc_PoolCreate(t *testing.T) {
+	missingSB := newTestMgmtSvc(nil)
+	missingSB.harness.instances[0]._superblock = nil
+	notAP := newTestMgmtSvc(nil)
+	notAP.harness.instances[0]._superblock.MS = false
+
+	for name, tc := range map[string]struct {
+		mgmtSvc       *mgmtSvc
+		setupMockDrpc func(_ *mgmtSvc, _ error)
+		targetCount   int
+		req           *mgmtpb.PoolCreateReq
+		expResp       *mgmtpb.PoolCreateResp
+		expErr        error
+	}{
+		"nil request": {
+			expErr: errors.New("nil request"),
+		},
+		"missing superblock": {
+			mgmtSvc:     missingSB,
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			expErr: errors.New("not an access point"),
+		},
+		"not access point": {
+			mgmtSvc:     notAP,
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			expErr: errors.New("not an access point"),
+		},
+		"dRPC send fails": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			expErr: errors.New("send failure"),
+		},
+		"zero target count": {
+			targetCount: 0,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			expErr: errors.New("zero target count"),
+		},
+		"garbage resp": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			setupMockDrpc: func(svc *mgmtSvc, err error) {
+				// dRPC call returns junk in the message body
+				badBytes := makeBadBytes(42)
+
+				setupMockDrpcClientBytes(svc, badBytes, err)
+			},
+			expErr: errors.New("unmarshal"),
+		},
+		"successful creation": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  100 * humanize.GiByte,
+				Nvmebytes: 10 * humanize.TByte,
+			},
+			expResp: &mgmtpb.PoolCreateResp{},
+		},
+		"successful creation minimum size": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  128 * humanize.MiByte,
+				Nvmebytes: 8 * humanize.GByte,
+			},
+			expResp: &mgmtpb.PoolCreateResp{},
+		},
+		"failed creation scm too small": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  127 * humanize.MiByte,
+				Nvmebytes: 8 * humanize.GByte,
+			},
+			expErr: FaultPoolScmTooSmall(127*(1<<20), 8),
+		},
+		"failed creation nvme too small": {
+			targetCount: 8,
+			req: &mgmtpb.PoolCreateReq{
+				Scmbytes:  128 * humanize.MiByte,
+				Nvmebytes: 7 * humanize.GByte,
+			},
+			expErr: FaultPoolNvmeTooSmall(7000000000, 8),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			log, buf := logging.NewTestLogger(t.Name())
+			defer common.ShowBufferOnFailure(t, buf)
+
+			if tc.mgmtSvc == nil {
+				ioCfg := ioserver.NewConfig().WithTargetCount(tc.targetCount)
+				r := ioserver.NewTestRunner(nil, ioCfg)
+
+				var msCfg mgmtSvcClientCfg
+				msCfg.AccessPoints = append(msCfg.AccessPoints, "localhost")
+
+				srv := NewIOServerInstance(log, nil, nil, newMgmtSvcClient(context.TODO(), log, msCfg), r)
+				srv.setSuperblock(&Superblock{MS: true})
+
+				harness := NewIOServerHarness(log)
+				if err := harness.AddInstance(srv); err != nil {
+					panic(err)
+				}
+
+				tc.mgmtSvc = newMgmtSvc(harness, nil)
+			}
+			tc.mgmtSvc.log = log
+
+			if _, err := tc.mgmtSvc.harness.GetMSLeaderInstance(); err == nil {
+				if tc.setupMockDrpc == nil {
+					tc.setupMockDrpc = func(svc *mgmtSvc, err error) {
+						setupMockDrpcClient(tc.mgmtSvc, tc.expResp, tc.expErr)
+					}
+				}
+				tc.setupMockDrpc(tc.mgmtSvc, tc.expErr)
+			}
+
+			gotResp, gotErr := tc.mgmtSvc.PoolCreate(context.TODO(), tc.req)
+			common.CmpErr(t, tc.expErr, gotErr)
+			if tc.expErr != nil {
+				return
+			}
+
+			if diff := cmp.Diff(tc.expResp, gotResp, common.DefaultCmpOpts()...); diff != "" {
+				t.Fatalf("unexpected response (-want, +got)\n%s\n", diff)
+			}
+		})
+	}
+}
+
+func TestMgmtSvc_PoolDestroy(t *testing.T) {
+	missingSB := newTestMgmtSvc(nil)
+	missingSB.harness.instances[0]._superblock = nil
+	notAP := newTestMgmtSvc(nil)
+	notAP.harness.instances[0]._superblock.MS = false
+
+	for name, tc := range map[string]struct {
+		mgmtSvc       *mgmtSvc
+		setupMockDrpc func(_ *mgmtSvc, _ error)
+		req           *mgmtpb.PoolDestroyReq
+		expResp       *mgmtpb.PoolDestroyResp
+		expErr        error
+	}{
+		"nil request": {
+			expErr: errors.New("nil request"),
+		},
+		"missing superblock": {
+			mgmtSvc: missingSB,
+			req:     &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			expErr:  errors.New("not an access point"),
+		},
+		"not access point": {
+			mgmtSvc: notAP,
+			req:     &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			expErr:  errors.New("not an access point"),
+		},
+		"dRPC send fails": {
+			req:    &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			expErr: errors.New("send failure"),
+		},
+		"zero target count": {
+			req:    &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			expErr: errors.New("zero target count"),
+		},
+		"garbage resp": {
+			req: &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			setupMockDrpc: func(svc *mgmtSvc, err error) {
+				// dRPC call returns junk in the message body
+				badBytes := makeBadBytes(42)
+
+				setupMockDrpcClientBytes(svc, badBytes, err)
+			},
+			expErr: errors.New("unmarshal"),
+		},
+		"missing uuid": {
+			req:    &mgmtpb.PoolDestroyReq{},
+			expErr: errors.New("nil UUID"),
+		},
+		"successful destroy": {
+			req:     &mgmtpb.PoolDestroyReq{Uuid: mockUUID},
+			expResp: &mgmtpb.PoolDestroyResp{},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			log, buf := logging.NewTestLogger(t.Name())
+			defer common.ShowBufferOnFailure(t, buf)
+
+			if tc.mgmtSvc == nil {
+				tc.mgmtSvc = newTestMgmtSvc(log)
+			}
+			tc.mgmtSvc.log = log
+
+			if _, err := tc.mgmtSvc.harness.GetMSLeaderInstance(); err == nil {
+				if tc.setupMockDrpc == nil {
+					tc.setupMockDrpc = func(svc *mgmtSvc, err error) {
+						setupMockDrpcClient(tc.mgmtSvc, tc.expResp, tc.expErr)
+					}
+				}
+				tc.setupMockDrpc(tc.mgmtSvc, tc.expErr)
+			}
+
+			gotResp, gotErr := tc.mgmtSvc.PoolDestroy(context.TODO(), tc.req)
+			common.CmpErr(t, tc.expErr, gotErr)
+			if tc.expErr != nil {
+				return
+			}
+
+			if diff := cmp.Diff(tc.expResp, gotResp, common.DefaultCmpOpts()...); diff != "" {
+				t.Fatalf("unexpected response (-want, +got)\n%s\n", diff)
+			}
+		})
+	}
+}
+
 func newTestListPoolsReq() *mgmtpb.ListPoolsReq {
 	return &mgmtpb.ListPoolsReq{
 		Sys: "daos",
@@ -743,7 +970,7 @@ func TestMgmtSvc_PoolQuery(t *testing.T) {
 			},
 			expErr: errors.New("send failure"),
 		},
-		"garbage req": {
+		"garbage resp": {
 			req: &mgmtpb.PoolQueryReq{
 				Uuid: mockUUID,
 			},
@@ -828,7 +1055,7 @@ func TestMgmtSvc_PoolSetProp(t *testing.T) {
 		expResp       *mgmtpb.PoolSetPropResp
 		expErr        error
 	}{
-		"garbage req": {
+		"garbage resp": {
 			req: withStrVal(withName(new(mgmtpb.PoolSetPropReq), "reclaim"), "disabled"),
 			setupMockDrpc: func(svc *mgmtSvc, err error) {
 				// dRPC call returns junk in the message body
@@ -2158,45 +2385,5 @@ func TestMgmtSvc_ConvertTimeout(t *testing.T) {
 
 	if diff := cmp.Diff(duration.String(), time.Duration(req.Timeout).String()); diff != "" {
 		t.Fatalf("unexpected response (-want, +got)\n%s\n", diff)
-	}
-}
-
-func TestMgmtSvc_validatePool(t *testing.T) {
-	for name, tc := range map[string]struct {
-		scmSize  string
-		nvmeSize string
-		tgtCount uint64
-		expErr   error
-	}{
-		"success":                     {"100G", "10T", 1, nil},
-		"scm too small":               {"15MiB", "10T", 1, FaultPoolScmTooSmall(15 * (1 << 20))},
-		"nvme too small":              {"100G", "900MB", 1, FaultPoolNvmeTooSmall(900000000)},
-		"no scm":                      {"0", "10T", 1, FaultPoolScmTooSmall(0)},
-		"no nvme":                     {"100G", "0", 1, nil},
-		"success multi-target":        {"128MiB", "8G", 8, nil},
-		"scm too small multi-target":  {"127MiB", "8G", 8, FaultPoolScmTooSmall(127 * (1 << 20))},
-		"nvme too small multi-target": {"128MiB", "7G", 8, FaultPoolNvmeTooSmall(7000000000)},
-		"no scm multi-target":         {"0", "10T", 8, FaultPoolScmTooSmall(0)},
-		"no nvme multi-target":        {"100G", "0", 8, nil},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, buf := logging.NewTestLogger(t.Name())
-			defer common.ShowBufferOnFailure(t, buf)
-
-			scmBytes, err := humanize.ParseBytes(tc.scmSize)
-			if err != nil {
-				t.Fatal(err)
-			}
-			nvmeBytes, err := humanize.ParseBytes(tc.nvmeSize)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			gotErr := (*mgmtSvc)(nil).validatePool(tc.tgtCount,
-				&mgmtpb.PoolCreateReq{
-					Scmbytes: scmBytes, Nvmebytes: nvmeBytes,
-				})
-			common.CmpErr(t, tc.expErr, gotErr)
-		})
 	}
 }

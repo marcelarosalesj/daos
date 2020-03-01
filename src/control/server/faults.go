@@ -67,23 +67,23 @@ var (
 	)
 )
 
-func FaultPoolNvmeTooSmall(reqBytes uint64) *fault.Fault {
+func FaultPoolNvmeTooSmall(reqBytes uint64, targetCount int) *fault.Fault {
 	return serverFault(
 		code.ServerPoolNvmeTooSmall,
-		fmt.Sprintf("requested NVMe capacity (%s) for pool is too small",
+		fmt.Sprintf("requested NVMe capacity (%s) is too small",
 			humanize.Bytes(reqBytes)),
-		fmt.Sprintf("specify an NVMe capacity larger than %s when creating a pool",
-			minNvmeSize),
+		fmt.Sprintf("NVMe capacity should be larger than %s * number of targets (%d)",
+			humanize.Bytes(minNvmeBytes), targetCount),
 	)
 }
 
-func FaultPoolScmTooSmall(reqBytes uint64) *fault.Fault {
+func FaultPoolScmTooSmall(reqBytes uint64, targetCount int) *fault.Fault {
 	return serverFault(
 		code.ServerPoolScmTooSmall,
-		fmt.Sprintf("requested SCM capacity (%s) for pool is too small",
+		fmt.Sprintf("requested SCM capacity (%s) is too small",
 			humanize.IBytes(reqBytes)),
-		fmt.Sprintf("specify an SCM capacity larger than %s when creating a pool",
-			minScmSize),
+		fmt.Sprintf("SCM capacity should be larger than %s * number of targets (%d)",
+			humanize.IBytes(minScmBytes), targetCount),
 	)
 }
 
