@@ -46,7 +46,7 @@ import (
 const (
 	instanceUpdateDelay = 500 * time.Millisecond
 	minScmBytes         = 16 * humanize.MiByte // per VOS target
-	minNvmeBytes        = 1 * humanize.GByte   // per VOS target
+	minNvmeBytes        = 1 * humanize.GiByte  // per VOS target
 )
 
 // NewRankResult returns a reference to a new member result struct.

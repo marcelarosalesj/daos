@@ -71,9 +71,9 @@ func FaultPoolNvmeTooSmall(reqBytes uint64, targetCount int) *fault.Fault {
 	return serverFault(
 		code.ServerPoolNvmeTooSmall,
 		fmt.Sprintf("requested NVMe capacity (%s) is too small",
-			humanize.Bytes(reqBytes)),
+			humanize.IBytes(reqBytes)),
 		fmt.Sprintf("NVMe capacity should be larger than %s * number of targets (%d)",
-			humanize.Bytes(minNvmeBytes), targetCount),
+			humanize.IBytes(minNvmeBytes), targetCount),
 	)
 }
 

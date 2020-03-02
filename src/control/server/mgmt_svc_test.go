@@ -216,26 +216,26 @@ func TestMgmtSvc_PoolCreate(t *testing.T) {
 		"successful creation minimum size": {
 			targetCount: 8,
 			req: &mgmtpb.PoolCreateReq{
-				Scmbytes:  128 * humanize.MiByte,
-				Nvmebytes: 8 * humanize.GByte,
+				Scmbytes:  minScmBytes * 8,
+				Nvmebytes: minNvmeBytes * 8,
 			},
 			expResp: &mgmtpb.PoolCreateResp{},
 		},
 		"failed creation scm too small": {
 			targetCount: 8,
 			req: &mgmtpb.PoolCreateReq{
-				Scmbytes:  127 * humanize.MiByte,
-				Nvmebytes: 8 * humanize.GByte,
+				Scmbytes:  (minScmBytes * 8) - 1,
+				Nvmebytes: minNvmeBytes * 8,
 			},
-			expErr: FaultPoolScmTooSmall(127*(1<<20), 8),
+			expErr: FaultPoolScmTooSmall((minScmBytes*8)-1, 8),
 		},
 		"failed creation nvme too small": {
 			targetCount: 8,
 			req: &mgmtpb.PoolCreateReq{
-				Scmbytes:  128 * humanize.MiByte,
-				Nvmebytes: 7 * humanize.GByte,
+				Scmbytes:  minScmBytes * 8,
+				Nvmebytes: (minNvmeBytes * 8) - 1,
 			},
-			expErr: FaultPoolNvmeTooSmall(7000000000, 8),
+			expErr: FaultPoolNvmeTooSmall((minNvmeBytes*8)-1, 8),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
