@@ -29,7 +29,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/pkg/errors"
 
@@ -237,15 +236,13 @@ func (h *IOServerHarness) startInstances(ctx context.Context, membership *system
 // instances are stopped or context is done.
 func (h *IOServerHarness) StopInstances(log logging.Logger, ctx context.Context, signal os.Signal, ranks ...uint32) error {
 	if !h.IsStarted() {
-		return FaultHarnessNotStarted
+		return nil
 	}
 
-	stopErrors := make([]error, 0, len(h.instances))
-	for _, i := range h.Instances() {
-		if !i.hasSuperblock() { // critical error
-			return FaultInstanceNoSuperblock(i.Index())
-		}
-
+	instances := h.Instances()
+	stopErrCh := make(chan error, len(instances))
+	stopping := 0
+	for _, i := range instances {
 		rank, ok := validateInstanceRank(log, i, ranks)
 		if !ok { // filtered out, no result expected
 			continue
@@ -255,32 +252,36 @@ func (h *IOServerHarness) StopInstances(log logging.Logger, ctx context.Context,
 			continue
 		}
 
-		if err := i.Stop(signal); err != nil {
-			stopErrors = append(stopErrors, errors.Wrapf(err,
-				"rank %d sent signal %s", *rank, signal))
-		}
-	}
-
-	stopped := make(chan struct{})
-	go func() {
-		for {
-			if len(h.StartedRanks()) > 0 {
-				time.Sleep(instanceUpdateDelay)
-				continue
+		go func(toStop *IOServerInstance) {
+			select {
+			case <-ctx.Done():
+				log.Errorf("context cancelled while stopping rank %d",
+					rank)
+			case stopErrCh <- toStop.Stop(signal):
+				return
 			}
-			close(stopped)
-			break
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		log.Error("graceful shutdown did not complete")
-	case <-stopped:
+		}(i)
+		stopping++
 	}
 
-	if len(stopErrors) > 0 {
-		return common.ConcatErrors(stopErrors, nil)
+	stopErrors := make([]error, 0, len(instances))
+	for {
+		select {
+		case <-ctx.Done():
+			log.Error("graceful shutdown did not complete")
+			return nil
+		case stopErr := <-stopErrCh:
+			if stopErr != nil {
+				stopErrors = append(stopErrors, stopErr)
+			}
+			stopping--
+			if stopping == 0 {
+				if len(stopErrors) > 0 {
+					return common.ConcatErrors(stopErrors, nil)
+				}
+				return nil
+			}
+		}
 	}
 
 	return nil
@@ -397,7 +398,7 @@ func (h *IOServerHarness) StartInstances() error {
 	defer h.RUnlock()
 
 	if !h.IsStarted() {
-		return FaultHarnessNotStarted
+		return errors.New("can't start instances: harness not started")
 	}
 	if !h.IsRestartable() {
 		return errors.New("can't start instances: already running")
