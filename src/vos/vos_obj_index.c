@@ -1,5 +1,5 @@
 /**
- * (C) Copyright 2016-2019 Intel Corporation.
+ * (C) Copyright 2016-2020 Intel Corporation.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -284,27 +284,26 @@ skip_log:
  */
 int
 vos_oi_punch(struct vos_container *cont, daos_unit_oid_t oid,
-	     daos_epoch_t epoch, uint64_t flags, struct vos_obj_df *obj)
+	     daos_epoch_t epoch, uint64_t flags, struct vos_obj_df *obj,
+	     struct vos_ilog_info *info, struct vos_ts_set *ts_set)
 {
-	daos_handle_t		 loh = DAOS_HDL_INVAL;
-	struct ilog_desc_cbs	 cbs;
-	int		 rc = 0;
+	daos_epoch_range_t	 epr = {0, epoch};
+	int			 rc = 0;
 
 	D_DEBUG(DB_TRACE, "Punch obj "DF_UOID", epoch="DF_U64".\n",
 		DP_UOID(oid), epoch);
 
-	/* Create a new incarnation of the log for punch */
-	vos_ilog_desc_cbs_init(&cbs, vos_cont2hdl(cont));
-	rc = ilog_open(vos_cont2umm(cont), &obj->vo_ilog, &cbs, &loh);
-	if (rc != 0)
-		return rc;
+	rc = vos_ilog_punch(cont, &obj->vo_ilog, &epr, NULL,
+			    info, ts_set, true);
 
-	rc = ilog_update(loh, NULL, epoch, true);
-
-	ilog_close(loh);
+	if (rc == 0 && vos_ts_check_rh_conflict(ts_set, epoch))
+		rc = -DER_AGAIN;
 
 	if (rc != 0)
-		D_ERROR("Failed to punch object, "DF_RC"\n", DP_RC(rc));
+		D_CDEBUG(rc == -DER_NONEXIST, DB_IO, DLOG_ERR,
+			 "Failed to update incarnation log entry: "DF_RC"\n",
+			 DP_RC(rc));
+
 	return rc;
 }
 
