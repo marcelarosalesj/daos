@@ -374,6 +374,46 @@ class DestroyTests(TestWithServers):
         self.assertTrue(
             exception_detected, "No exception when deleting a connected pool")
 
+    def test_forcedestroy_connected(self):
+        """Forcibly destroy pool with connected client.
+
+        Test destroying a pool that has a connected client with force == true.
+        Should pass.
+
+        :avocado: tags=all,medium,pr
+        :avocado: tags=pool,destroy,forcedestroyconnected
+        """
+        hostlist_servers = self.hostlist_servers[:1]
+
+        # Start servers
+        self.start_servers({self.server_group: hostlist_servers})
+
+        # Create the pool
+        self.validate_pool_creation(hostlist_servers, self.server_group)
+
+        # Connect to the pool
+        self.assertTrue(
+            self.pool.connect(), "Pool connect failed before destroy")
+
+        # Destroy pool with direct API call (no disconnect)
+        self.log.info("Attempting to forcibly destroy a connected pool")
+        exception_detected = False
+        try:
+            self.pool.pool.destroy(1)
+        except DaosApiError as result:
+            exception_detected = True
+            self.log.info(
+                "Unexpected exception - destroying connected pool: %s",
+                str(result))
+
+        if exception_detected:
+            # The pool-destroy did not pass but it should have passed
+            self.log.error(
+                "Unexpected exception - force destroy connected pool")
+
+        self.assertFalse(
+            exception_detected, "Got exception - force destroy connected pool")
+
     def test_destroy_withdata(self):
         """Destroy Pool with data.
 
