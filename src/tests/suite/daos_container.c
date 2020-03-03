@@ -1153,7 +1153,7 @@ co_query_access(void **state)
 	expect_co_query_access(arg, prop,
 			       DAOS_ACL_PERM_CONT_ALL &
 			       ~(DAOS_ACL_PERM_GET_PROP |
-			         DAOS_ACL_PERM_GET_ACL),
+				 DAOS_ACL_PERM_GET_ACL),
 			       -DER_NO_PERM);
 	daos_prop_free(prop);
 
@@ -1176,7 +1176,7 @@ co_query_access(void **state)
 	expect_co_query_access(arg, prop,
 			       DAOS_ACL_PERM_CONT_ALL &
 			       ~(DAOS_ACL_PERM_GET_PROP |
-			         DAOS_ACL_PERM_GET_ACL),
+				 DAOS_ACL_PERM_GET_ACL),
 			       -DER_NO_PERM);
 	daos_prop_free(prop);
 
