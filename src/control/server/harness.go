@@ -38,18 +38,18 @@ import (
 	"github.com/daos-stack/daos/src/control/system"
 )
 
-// IOServerHarness is responsible for managing IOServer instances
+// IOServerHarness is responsible for managing IOServer instances.
 type IOServerHarness struct {
 	sync.RWMutex
-	log         logging.Logger
-	instances   []*IOServerInstance
-	started     uint32
-	restartable uint32
-	restart     chan struct{}
-	errChan     chan error
+	log       logging.Logger
+	instances []*IOServerInstance
+	started   uint32
+	startable uint32
+	restart   chan struct{}
+	errChan   chan error
 }
 
-// NewHarness returns an initialized *IOServerHarness
+// NewIOServerHarness returns an initialized *IOServerHarness.
 func NewIOServerHarness(log logging.Logger) *IOServerHarness {
 	return &IOServerHarness{
 		log:       log,
@@ -59,6 +59,7 @@ func NewIOServerHarness(log logging.Logger) *IOServerHarness {
 	}
 }
 
+// Instances safely returns harness' IOServerInstances.
 func (h *IOServerHarness) Instances() []*IOServerInstance {
 	h.RLock()
 	defer h.RUnlock()
@@ -230,21 +231,30 @@ func (h *IOServerHarness) startInstances(ctx context.Context, membership *system
 	return nil
 }
 
-// StopInstances will stop harness-managed instances.
+// SignalInstances will signal harness-managed instances.
 //
-// Iterate over instances and call Stop(signal) on each, return when all
-// instances are stopped or context is done.
-func (h *IOServerHarness) StopInstances(log logging.Logger, ctx context.Context, signal os.Signal, ranks ...uint32) error {
+// Iterate over instances and call Signal(sig) on each, return when all instances
+// have been sent signal or context is done.
+func (h *IOServerHarness) SignalInstances(ctx context.Context, log logging.Logger, signal os.Signal, ranks ...uint32) error {
 	if !h.IsStarted() {
 		return nil
 	}
+	if signal == nil {
+		return errors.New("nil signal")
+	}
 
 	instances := h.Instances()
+	log.Debugf("stopping %d instances\n", len(instances))
+	log.Debugf("ranks %v\n", ranks)
 	stopErrCh := make(chan error, len(instances))
 	stopping := 0
 	for _, i := range instances {
-		rank, ok := validateInstanceRank(log, i, ranks)
-		if !ok { // filtered out, no result expected
+		log.Debugf("stopping instance %d\n", i.Index())
+		rank, err := validateInstanceRank(log, i, ranks)
+		if err != nil {
+			return err
+		}
+		if rank == nil { // filtered out, no result expected
 			continue
 		}
 
@@ -252,15 +262,15 @@ func (h *IOServerHarness) StopInstances(log logging.Logger, ctx context.Context,
 			continue
 		}
 
-		go func(toStop *IOServerInstance) {
+		go func(toStop *IOServerInstance, r uint32, s os.Signal) {
 			select {
 			case <-ctx.Done():
-				log.Errorf("context cancelled while stopping rank %d",
-					rank)
-			case stopErrCh <- toStop.Stop(signal):
+				log.Errorf("context cancelled while stopping rank %d", r)
+			case stopErrCh <- toStop.Signal(s): // Signal() is nonblocking
+				log.Debugf("sending signal %s\n", s)
 				return
 			}
-		}(i)
+		}(i, *rank, signal)
 		stopping++
 	}
 
@@ -283,8 +293,6 @@ func (h *IOServerHarness) StopInstances(log logging.Logger, ctx context.Context,
 			}
 		}
 	}
-
-	return nil
 }
 
 // waitInstancesReady awaits ready signal from I/O server before starting
@@ -335,15 +343,13 @@ func (h *IOServerHarness) monitor(ctx context.Context) error {
 			msg := fmt.Sprintf("instance exited: %v", err)
 			if len(h.StartedRanks()) == 0 {
 				msg += ", all instances stopped!"
-				h.setRestartable()
+				h.setStartable()
 			}
 			h.log.Info(msg)
 		case <-h.restart: // harness to restart instances
 			return nil
 		}
 	}
-
-	return nil
 }
 
 // Start starts all configured instances, waits for them to be ready and then
@@ -387,8 +393,6 @@ func (h *IOServerHarness) Start(parent context.Context, membership *system.Membe
 			return err
 		}
 	}
-
-	return nil
 }
 
 // StartInstances will signal the harness to start configured instances once
@@ -400,7 +404,7 @@ func (h *IOServerHarness) StartInstances() error {
 	if !h.IsStarted() {
 		return errors.New("can't start instances: harness not started")
 	}
-	if !h.IsRestartable() {
+	if !h.IsStartable() {
 		return errors.New("can't start instances: already running")
 	}
 	if len(h.StartedRanks()) > 0 {
@@ -454,6 +458,7 @@ func (h *IOServerHarness) setStopped() {
 	atomic.StoreUint32(&h.started, 0)
 }
 
+// IsStarted indicates whether the IOServerHarness is in a running state.
 func (h *IOServerHarness) IsStarted() bool {
 	return atomic.LoadUint32(&h.started) == 1
 }
@@ -474,10 +479,11 @@ func (h *IOServerHarness) StartedRanks() []*ioserver.Rank {
 	return ranks
 }
 
-func (h *IOServerHarness) setRestartable() {
-	atomic.StoreUint32(&h.restartable, 1)
+func (h *IOServerHarness) setStartable() {
+	atomic.StoreUint32(&h.startable, 1)
 }
 
-func (h *IOServerHarness) IsRestartable() bool {
-	return atomic.LoadUint32(&h.restartable) == 1
+// IsStartable indicates whether the IOServerHarness is ready to be started.
+func (h *IOServerHarness) IsStartable() bool {
+	return atomic.LoadUint32(&h.startable) == 1
 }

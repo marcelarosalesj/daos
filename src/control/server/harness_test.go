@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -354,6 +355,95 @@ func TestHarnessIOServerStart(t *testing.T) {
 						srv.Index(), expCall, lastCall)
 				}
 			}
+		})
+	}
+}
+
+func TestHarness_SignalInstances(t *testing.T) {
+	for name, tc := range map[string]struct {
+		trc               *ioserver.TestRunnerConfig
+		ioserverCount     int
+		signal            os.Signal
+		ranks             []uint32
+		harnessNotStarted bool
+		expErr            error
+		expSignalsSent    map[uint32]os.Signal
+		missingSB         bool
+	}{
+		"nil signal": {
+			expErr: errors.New("nil signal"),
+		},
+		"missing superblock": {
+			missingSB: true,
+			signal:    syscall.SIGKILL,
+			expErr:    errors.New("nil superblock"),
+		},
+		"harness not started": {
+			harnessNotStarted: true,
+			signal:            syscall.SIGKILL,
+			expSignalsSent:    map[uint32]os.Signal{},
+		},
+		"ranks not in list": {
+			ranks:          []uint32{2, 3},
+			signal:         syscall.SIGKILL,
+			expSignalsSent: map[uint32]os.Signal{},
+		},
+		"normal stop single-io": {
+			ioserverCount:  1,
+			signal:         syscall.SIGINT,
+			expSignalsSent: map[uint32]os.Signal{0: syscall.SIGINT},
+		},
+		"normal stop multi-io": {
+			signal:         syscall.SIGTERM,
+			expSignalsSent: map[uint32]os.Signal{0: syscall.SIGTERM, 1: syscall.SIGTERM},
+		},
+		"force stop multi-io": {
+			signal:         syscall.SIGKILL,
+			expSignalsSent: map[uint32]os.Signal{0: syscall.SIGKILL, 1: syscall.SIGKILL},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			log, buf := logging.NewTestLogger(t.Name())
+			defer common.ShowBufferOnFailure(t, buf)
+
+			signalsSent := make(map[uint32]os.Signal)
+			if tc.ioserverCount == 0 {
+				tc.ioserverCount = maxIoServers
+			}
+			if tc.ranks == nil {
+				tc.ranks = []uint32{}
+			}
+			svc := newTestMgmtSvcMulti(log, tc.ioserverCount, false)
+			if !tc.harnessNotStarted {
+				svc.harness.setStarted()
+			}
+			for i, srv := range svc.harness.Instances() {
+				if tc.missingSB {
+					srv._superblock = nil
+					continue
+				}
+				if tc.trc == nil {
+					tc.trc = &ioserver.TestRunnerConfig{}
+				}
+				if tc.trc.SignalCb == nil {
+					tc.trc.SignalCb = func(idx uint32, sig os.Signal) { signalsSent[idx] = sig }
+				}
+				srv.runner = ioserver.NewTestRunner(tc.trc, ioserver.NewConfig())
+				srv.SetIndex(uint32(i))
+
+				srv._superblock.Rank = new(ioserver.Rank)
+				*srv._superblock.Rank = ioserver.Rank(i + 1)
+			}
+
+			ctx, shutdown := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer shutdown()
+			common.CmpErr(t, tc.expErr, svc.harness.SignalInstances(ctx, log, tc.signal, tc.ranks...))
+
+			if tc.expErr != context.Canceled {
+				return
+			}
+
+			common.AssertEqual(t, tc.expSignalsSent, signalsSent, name)
 		})
 	}
 }

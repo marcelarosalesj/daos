@@ -708,25 +708,26 @@ func (svc *mgmtSvc) StorageSetFaulty(ctx context.Context, req *mgmtpb.DevStateRe
 }
 
 // validateInstanceRank checks instance rank in superblock matches supplied list.
-func validateInstanceRank(log logging.Logger, i *IOServerInstance, ranks []uint32) (*uint32, bool) {
-	if !i.hasSuperblock() {
-		return nil, false
+//
+// Return nil rank to indicate not in list.
+func validateInstanceRank(log logging.Logger, i *IOServerInstance, ranks []uint32) (*uint32, error) {
+	rank, err := i.Rank()
+	if err != nil {
+		return nil, err
 	}
-
-	rank := i.getSuperblock().Rank.Uint32()
 
 	if len(ranks) == 0 {
-		return &rank, true // no ranks to filter, allow all
+		return rank, nil // no ranks to filter, allow all
 	}
 	for _, r := range ranks {
-		if r == rank {
-			return &rank, true
+		if r == *rank {
+			return rank, nil // found
 		}
 	}
 
-	log.Debugf("validateInstanceRank() skipping rank %d", rank)
+	log.Debugf("validateInstanceRank() skipping rank %d", *rank)
 
-	return &rank, false
+	return nil, nil
 }
 
 // PrepShutdown implements the method defined for the Management Service.
@@ -746,8 +747,11 @@ func (svc *mgmtSvc) PrepShutdownRanks(ctx context.Context, req *mgmtpb.RanksReq)
 	resp := &mgmtpb.RanksResp{}
 
 	for _, i := range svc.harness.instances {
-		rank, ok := validateInstanceRank(svc.log, i, req.Ranks)
-		if !ok { // filtered out, no result expected
+		rank, err := validateInstanceRank(svc.log, i, req.Ranks)
+		if err != nil {
+			return nil, err
+		}
+		if rank == nil { // filtered out, no result expected
 			continue
 		}
 
@@ -791,7 +795,7 @@ func (svc *mgmtSvc) StopRanks(parent context.Context, req *mgmtpb.RanksReq) (*mg
 	if req.Force {
 		signal = syscall.SIGKILL
 	}
-	if err := svc.harness.StopInstances(svc.log, ctx, signal, req.Ranks...); err != nil {
+	if err := svc.harness.SignalInstances(ctx, svc.log, signal, req.Ranks...); err != nil {
 		return nil, errors.Wrap(err, "signalling instances to stop")
 	}
 
@@ -839,8 +843,6 @@ func ping(i *IOServerInstance, rank uint32, timeout time.Duration) *mgmtpb.Ranks
 		return NewRankResult(rank, "ping", system.MemberStateUnresponsive,
 			errors.New("timeout occurred"))
 	}
-
-	return nil
 }
 
 // PingRanks implements the method defined for the Management Service.
@@ -862,8 +864,11 @@ func (svc *mgmtSvc) PingRanks(ctx context.Context, req *mgmtpb.RanksReq) (*mgmtp
 	resp := &mgmtpb.RanksResp{}
 
 	for _, i := range svc.harness.Instances() {
-		rank, ok := validateInstanceRank(svc.log, i, req.Ranks)
-		if !ok { // filtered out, no result expected
+		rank, err := validateInstanceRank(svc.log, i, req.Ranks)
+		if err != nil {
+			return nil, err
+		}
+		if rank == nil { // filtered out, no result expected
 			continue
 		}
 

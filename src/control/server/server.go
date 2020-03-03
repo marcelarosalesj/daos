@@ -263,7 +263,7 @@ func Start(log *logging.LeveledLogger, cfg *Configuration) error {
 		defer cancel()
 
 		// Attampt graceful shutdown of I/O servers.
-		if err := harness.StopInstances(log, stopCtx, sig); err != nil {
+		if err := harness.SignalInstances(stopCtx, log, sig); err != nil {
 			log.Error(errors.Wrap(err, "stopping instances").Error())
 		}
 	}()

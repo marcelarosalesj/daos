@@ -24,6 +24,7 @@ package ioserver
 
 import (
 	"context"
+	"fmt"
 	"os"
 )
 
@@ -31,6 +32,8 @@ type (
 	TestRunnerConfig struct {
 		StartCb    func()
 		StartErr   error
+		SignalCb   func(uint32, os.Signal)
+		SignalErr  error
 		ErrChanCb  func() error
 		ErrChanErr error
 	}
@@ -73,7 +76,13 @@ func (tr *TestRunner) Start(ctx context.Context, errChan chan<- error) error {
 	return tr.runnerCfg.StartErr
 }
 
-func (tr *TestRunner) Stop(os.Signal) error { return nil }
+func (tr *TestRunner) Signal(sig os.Signal) error {
+	if tr.runnerCfg.SignalCb != nil {
+		fmt.Printf("signal: %s\n", sig)
+		tr.runnerCfg.SignalCb(tr.serverCfg.Index, sig)
+	}
+	return tr.runnerCfg.SignalErr
+}
 
 func (tr *TestRunner) IsRunning() bool { return true }
 

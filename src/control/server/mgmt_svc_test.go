@@ -1580,7 +1580,7 @@ func TestMgmtSvc_DrespToRankResult(t *testing.T) {
 		daosResp    *mgmtpb.DaosResp
 		inErr       error
 		targetState system.MemberState
-		junkRpc     bool
+		junkRPC     bool
 		expResult   *mgmtpb.RanksResp_RankResult
 	}{
 		"rank success": {
@@ -1603,7 +1603,7 @@ func TestMgmtSvc_DrespToRankResult(t *testing.T) {
 			},
 		},
 		"unmarshal failure": {
-			junkRpc: true,
+			junkRPC: true,
 			expResult: &mgmtpb.RanksResp_RankResult{
 				Rank: dRank, Action: "test", State: uint32(dStateBad), Errored: true,
 				Msg: fmt.Sprintf("rank %d dRPC unmarshal failed: proto: mgmt.DaosResp: illegal tag 0 (wire type 0)", dRank),
@@ -1623,7 +1623,7 @@ func TestMgmtSvc_DrespToRankResult(t *testing.T) {
 
 			// convert input DaosResp to drpcResponse to test
 			rb := makeBadBytes(42)
-			if !tc.junkRpc {
+			if !tc.junkRPC {
 				rb, _ = proto.Marshal(tc.daosResp)
 			}
 			resp := &drpc.Response{
@@ -2122,7 +2122,7 @@ func TestMgmtSvc_StartRanks(t *testing.T) {
 			svc := newTestMgmtSvcMulti(log, ioserverCount, false)
 
 			svc.harness.setStarted()
-			svc.harness.setRestartable()
+			svc.harness.setStartable()
 
 			for i, srv := range svc.harness.instances {
 				if tc.missingSB {
