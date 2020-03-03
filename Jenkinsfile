@@ -39,7 +39,7 @@
 // To use a test branch (i.e. PR) until it lands to master
 // I.e. for testing library changes
 //@Library(value="pipeline-lib@your_branch") _
-
+@Library(["system-pipeline-lib@corci-854","pipeline-lib@corci-854"]) _
 
 def daos_branch = "master"
 def arch = ""
@@ -849,6 +849,8 @@ pipeline {
                     steps {
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 1,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        snapshot: true,
                                        inst_repos: el7_component_repos + ' ' + component_repos,
                                        inst_rpms: 'gotestsum openmpi3 hwloc-devel argobots ' +
@@ -1046,6 +1048,8 @@ pipeline {
                         }
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 9,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        snapshot: true,
                                        inst_repos: el7_daos_repos,
                                        inst_rpms: 'daos-' + daos_packages_version +
@@ -1123,7 +1127,7 @@ pipeline {
                     }
                     agent {
                         // 2 node cluster with 1 IB/node + 1 test control node
-                        label 'ci_nvme3'
+                        label 'stage_nvme3'
                     }
                     steps {
                         unstash 'CentOS-rpm-version'
@@ -1133,7 +1137,8 @@ pipeline {
                         // Just reboot the physical nodes
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 3,
-                                       power_only: true,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        inst_repos: el7_daos_repos,
                                        inst_rpms: 'daos-' + daos_packages_version +
                                                   ' daos-client-' + daos_packages_version +
@@ -1211,7 +1216,7 @@ pipeline {
                     }
                     agent {
                         // 4 node cluster with 2 IB/node + 1 test control node
-                        label 'ci_nvme5'
+                        label 'stage_nvme5'
                     }
                     steps {
                         unstash 'CentOS-rpm-version'
@@ -1221,7 +1226,8 @@ pipeline {
                         // Just reboot the physical nodes
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 5,
-                                       power_only: true,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        inst_repos: el7_daos_repos,
                                        inst_rpms: 'daos-' + daos_packages_version +
                                                   ' daos-client-' + daos_packages_version +
@@ -1299,7 +1305,7 @@ pipeline {
                     }
                     agent {
                         // 8+ node cluster with 1 IB/node + 1 test control node
-                        label 'ci_nvme9'
+                        label 'stage_nvme9'
                     }
                     steps {
                         unstash 'CentOS-rpm-version'
@@ -1309,7 +1315,8 @@ pipeline {
                         // Just reboot the physical nodes
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 9,
-                                       power_only: true,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        inst_repos: el7_daos_repos,
                                        inst_rpms: 'daos-' + daos_packages_version +
                                                   ' daos-client-' + daos_packages_version +
@@ -1392,6 +1399,8 @@ pipeline {
                         }
                         provisionNodes NODELIST: env.NODELIST,
                                        node_count: 1,
+                                       profile: 'daos_ci',
+                                       distro: 'el7',
                                        snapshot: true,
                                        inst_repos: el7_daos_repos
                         catchError(stageResult: 'UNSTABLE', buildResult: 'SUCCESS') {
